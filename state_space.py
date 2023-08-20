@@ -36,6 +36,8 @@ class state_space:
         self.symbols = symbols
         self.order = len(self.state_equation)
         self.t = sp.Symbol('t')
+        self.state_one = 1
+        self.state_two = 2
 
         print(f"{self.order}º order system defined")
 
@@ -176,20 +178,20 @@ class state_space:
         k = 0
         equations = []
         for equation in self.state_equation:
-                equations.append(sp.lambdify(self.symbols, equation.rhs, 'numpy'))
+            equations.append(sp.lambdify(self.symbols, equation.rhs, 'numpy'))
 
         # Solver loop
         for time_step in stime:
             states_counter = 1
             for equation in equations:
                 xin = solution[f"x{states_counter}"]
-                xind  = equation(*self.symbols)
-                for symbol, subs in zip(self.symbols, range(self.order)):
+                past_results = []
+                for subs in range(self.order):
                     # Calculates x[k+1] = x[k] + dx_dt*time_step
-                    xind = xind.subs(symbol, solution[f"x{subs+1}"][-1])
+                    past_results.append(solution[f"x{subs+1}"][-1])
 
-                xin_derivative = sp.N(xind)
-                xin = np.append(xin, xin[k]+(xin_derivative)*step)
+                xind = equation(*past_results)
+                xin = np.append(xin, xin[k]+(xind)*step)
                 solution[f"x{states_counter}"] = xin
                 states_counter+=1
             k+=1
@@ -201,7 +203,96 @@ class state_space:
         self.solution = solution
         self.simulation_time = stime
 
-    
+    def phasePortrait(self, x1, x2, state_one, state_two):        
+        """
+        Phase Portrait calculater, solves the values of two selected states for t=0
+
+        Parameters
+        ==========
+        x1 : numpy array
+            x1 plot interval.
+        x2 : numpy array
+            x2 plot interval.
+        state_one : int
+            first selected state.
+        state_two : int
+            second selected state.
+        """
+
+        # Creates meshgrid for the phase portrait
+        self.X1, self.X2 = np.meshgrid(x1, x2)
+        self.state_one = state_one 
+        self.state_two = state_two 
+        state_one = state_one - 1
+        state_two = state_two - 1
+
+        # Creates the u and v vectores, that indicate the rate of the derivates for both states
+        self.u = np.zeros(self.X1.shape) 
+        self.v = np.zeros(self.X2.shape)
+        NI, NJ = self.X1.shape
+
+        # result holds the grid sequence for the plot
+        result = np.zeros(self.order)
+
+        # main plot loop, for each pair i, j in the plot calculates the u, v vectors
+        for i in range(NI):
+            for j in range(NJ):
+                x = self.X1[i, j]
+                y = self.X2[i, j]
+                xprime = []
+                for equation in [self.state_equation[state_one], self.state_equation[state_two]]:
+                    result[state_one] = x
+                    result[state_two] = y
+                    equation = sp.lambdify(self.symbols, equation.rhs, 'numpy')
+                    xprime.append(equation(*result))
+
+                # copies to the u, v holding variables
+                self.u[i,j] = xprime[0]
+                self.v[i,j] = xprime[1]
+
+    def plot2DphasePortrait(self, xlim=[-2.25, 8.25], ylim = [-3.5, 4.5], solutions=False, 
+                            tstart=0, tend=50, x1=[0], x2=[0]):
+        """
+        2D phase portrait plotter, can also show solutions for a the selected initial conditions
+
+        Parameters
+        ==========
+        xlim : list
+            x axe limites.
+        ylim : list
+            y axe limites.
+        solutions : bool
+            selects whether the path solutions will be plotted as well.
+        tstart : int
+            time start for the solutions plot.
+        tend : int 
+            time end for the solutions plot.
+        x1 : list
+            list of all desired initial values for x1 plot
+        x2 : list
+            list of all desired initial values for x2 plot
+        """
+
+        # Phase Portrait plot calls, quiver creates the vectors
+        Q = plt.quiver(self.X1, self.X2, self.u, self.v, color='r')
+        plt.xlabel('$x_1$')
+        plt.ylabel('$x_2$')
+        plt.xlim(xlim)
+        plt.ylim(ylim)
+
+        # loop for the all the solutions, also creates the legend box to indicate all the start and end points
+        if solutions:
+            for x_x in x1:
+                for x_y in x2:
+                    plot_values = [x_x, x_y]
+                    self.runSimulation(tstart, tend, 0.1, *plot_values, solve_method='int')
+                    plt.plot(self.solution[f"x{self.state_one}"][:], self.solution[f"x{self.state_two}"][:], 'b-')
+                    plt.plot(self.solution[f"x{self.state_one}"][0], self.solution[f"x{self.state_two}"][0], 'o', label=f"x1:{x_x} x2: {x_y} start")
+                    plt.plot(self.solution[f"x{self.state_one}"][-1], self.solution[f"x{self.state_two}"][-1], 's', label=f"x1:{x_x} x2: {x_y} end")
+            plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), fancybox=True, shadow=True, ncol=1)
+        
+        plt.show()
+
     def plot2DResults(self, state):
         """
         2D time domain plotter abstraction.
